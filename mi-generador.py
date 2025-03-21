@@ -14,6 +14,8 @@ services:
       - LOGGING_LEVEL=DEBUG
     networks:
       - testing_net
+    volumes:
+      - ./server/config.ini:/config.ini
 """
     
     for i in range(1, cantidad + 1):
@@ -28,6 +30,8 @@ services:
       - testing_net
     depends_on:
       - server
+    volumes:
+      - ./client/config.yaml:/config.yaml
 """
 
     compose_yaml += """
