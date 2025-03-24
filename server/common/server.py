@@ -63,7 +63,7 @@ class Server:
         logging.info(f'action: accept_connections | result: success | ip: {addr[0]}')
         return c
     
-    def __handle_shutdown(self):
+    def __handle_shutdown(self, signum, frame):
         for client in self._clients:
             client.close()
             
