@@ -2,6 +2,7 @@ import socket
 import logging
 import signal
 import sys
+from common.utils import store_bets, Bet
 
 class Server:
     def __init__(self, port, listen_backlog):
@@ -29,6 +30,17 @@ class Server:
             self._clients.append(client_sock)
             self.__handle_client_connection(client_sock)
 
+    def __receive_bet_data(self, sock):
+        length_byte = sock.recv(1)
+
+        message_length = ord(length_byte)
+
+        parts = sock.recv(message_length).decode('utf-8').strip().split('|')
+        if len(parts) == 5:
+            name, surname, id, birthdate, number = parts
+            return Bet(0, name, surname, id, birthdate, number)
+        return None
+
     def __handle_client_connection(self, client_sock):
         """
         Read message from a specific client socket and closes the socket
@@ -37,12 +49,16 @@ class Server:
         client socket will also be closed
         """
         try:
-            # TODO: Modify the receive to avoid short-reads
-            msg = client_sock.recv(1024).rstrip().decode('utf-8')
+            bet = self.__receive_bet_data(client_sock)
+            if not bet:
+                logging.error("action: apuesta_almacenada | result: fail")
+                return
             addr = client_sock.getpeername()
-            logging.info(f'action: receive_message | result: success | ip: {addr[0]} | msg: {msg}')
+            store_bets([bet])
+            logging.info(f'action: apuesta_almacenada | result: success | ip: {addr[0]} | dni: {bet.document}')
+            
             # TODO: Modify the send to avoid short-writes
-            client_sock.send("{}\n".format(msg).encode('utf-8'))
+            client_sock.send("{}\n".format(bet.number).encode('utf-8'))
         except OSError as e:
             logging.error("action: receive_message | result: fail | error: {e}")
         finally:
