@@ -23,7 +23,7 @@ func NewBetParser(filePath string) (*BetParser, error) {
 	return &BetParser{scanner: reader, file: file}, nil
 }
 
-func (r *BetParser) ReadBets(batchSize int) ([]Bet, error) {
+func (r *BetParser) ReadBets(batchSize int, agencyId string) ([]Bet, error) {
 	var bets []Bet
 	for i := 0; i < batchSize; i++ {
 		record, err := r.scanner.Read()
@@ -37,6 +37,7 @@ func (r *BetParser) ReadBets(batchSize int) ([]Bet, error) {
 			return nil, err
 		}
 		bets = append(bets, Bet{
+			Agency:    agencyId,
 			Name:      record[0],
 			Surname:   record[1],
 			ID:        record[2],

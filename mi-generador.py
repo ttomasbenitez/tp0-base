@@ -1,4 +1,5 @@
 import sys
+import configparser
 
 def generar_compose(archivo_salida, cantidad_clientes):
     cantidad = int(cantidad_clientes)
@@ -45,9 +46,22 @@ networks:
     with open(archivo_salida, "w") as f:
         f.write(compose_yaml)
 
+def actualizar_config_file(cantidad_clientes):
+    """Actualizar config.ini file con CLIENTS_AMOUNT"""
+    config = configparser.ConfigParser()
+    config.optionxform = str
+    config.read('server/config.ini')
+
+    config['DEFAULT']['CLIENTS_AMOUNT'] = str(cantidad_clientes).upper()
+    config.set('DEFAULT', 'CLIENTS_AMOUNT', str(cantidad_clientes))
+
+    with open('server/config.ini', 'w') as configfile:
+        config.write(configfile)
+
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         print("Uso: mi-generador.py <archivo_salida> <cantidad_clientes>")
         sys.exit(1)
     
     generar_compose(sys.argv[1], sys.argv[2])
+    actualizar_config_file(sys.argv[2])

@@ -1,6 +1,7 @@
 package common
 
 import (
+	"bufio"
 	"io"
 	"net"
 	"os"
@@ -11,7 +12,9 @@ import (
 	"github.com/op/go-logging"
 )
 
+const DataMessageType = 0x01
 const EndMessageType = 0x02
+const AskWinnersType = 0x03
 
 var log = logging.MustGetLogger("log")
 
@@ -86,7 +89,7 @@ func (c *Agency) sendMessage(message []byte) error {
 		}
 		totalWritten += n
 	}
-	log.Infof("action: ENVIADO | result: success | BYTES: %v", totalWritten)
+	//log.Infof("action: ENVIADO | result: success | BYTES: %v", totalWritten)
 	return nil
 }
 
@@ -100,8 +103,8 @@ func (c *Agency) StartAgency() {
 	}
 
 	for {
-		log.Infof("action: READ | result: success")
-		bets, err := c.betParser.ReadBets(c.config.BatchSize)
+		//log.Infof("action: READ | result: success")
+		bets, err := c.betParser.ReadBets(c.config.BatchSize, c.config.ID)
 		if err != nil {
 			if err == io.EOF {
 				break
@@ -116,12 +119,44 @@ func (c *Agency) StartAgency() {
 			log.Errorf("action: apuesta_enviada | result: fail | error: %v", err)
 			return
 		}
-		log.Infof("action: SEMNT | result: success")
 	}
 	c.sendMessage([]byte{EndMessageType})
+	//log.Infof("action: END_MESS_SENT | result: success")
+	c.sendMessage([]byte{AskWinnersType})
+	log.Infof("action: ASK_WINNERS_SENT | result: success")
 
-	log.Infof("action: apuesta_enviada | result: success")
+	reader := bufio.NewReader(c.conn)
+	var winners_amount = 0
+	for {
+		msgType, err := reader.ReadByte()
+		if err != nil {
+			log.Errorf("action: AAreceive_message | result: fail | agency_id: %v | error: %v",
+				c.config.ID,
+				err,
+			)
+			return
+		}
+
+		if msgType == EndMessageType {
+			break
+		}
+
+		if msgType == DataMessageType {
+			_, err := reader.ReadString('\n')
+			if err != nil {
+				log.Errorf("action: receive_message | result: fail | agency_id: %v | error: %v",
+					c.config.ID,
+					err,
+				)
+				return
+			}
+
+			winners_amount++
+		}
+	}
+
+	log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %v", winners_amount)
 	c.betParser.Close()
 	c.conn.Close()
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 }

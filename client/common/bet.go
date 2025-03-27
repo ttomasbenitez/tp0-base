@@ -6,6 +6,7 @@ import (
 )
 
 type Bet struct {
+	Agency    string
 	Name      string
 	Surname   string
 	ID        string
@@ -17,7 +18,7 @@ func serializeBets(bets []Bet) []byte {
 	var messageData string
 
 	for _, bet := range bets {
-		line := fmt.Sprintf("%s|%s|%s|%s|%s\n", bet.Name, bet.Surname, bet.ID, bet.Birthdate, bet.Number)
+		line := fmt.Sprintf("%s|%s|%s|%s|%s|%s\n", bet.Agency, bet.Name, bet.Surname, bet.ID, bet.Birthdate, bet.Number)
 		messageData += line
 	}
 
