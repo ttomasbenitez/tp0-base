@@ -14,6 +14,10 @@ type Bet struct {
 	Number    string
 }
 
+// This function serializes a slice of Bet structs into a TLV-encoded byte slice.
+// Each bet is separated by a \n character, and each field is separated by a | character.
+// The TLV format consists of a single byte for the type, two bytes for the length,
+// followed by the actual data.
 func serializeBets(bets []Bet) []byte {
 	var messageData string
 
@@ -27,7 +31,7 @@ func serializeBets(bets []Bet) []byte {
 
 	// TLV: Type (1 byte) + Length (2 bytes) + Value
 	message := make([]byte, 3)
-	message[0] = 0x01 // Type: Bet data
+	message[0] = DataMessageType // Type: Bet data
 	binary.BigEndian.PutUint16(message[1:], messageLength)
 	message = append(message, valueBytes...)
 
