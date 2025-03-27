@@ -89,7 +89,6 @@ func (c *Agency) sendMessage(message []byte) error {
 		}
 		totalWritten += n
 	}
-	//log.Infof("action: ENVIADO | result: success | BYTES: %v", totalWritten)
 	return nil
 }
 
@@ -103,7 +102,6 @@ func (c *Agency) StartAgency() {
 	}
 
 	for {
-		//log.Infof("action: READ | result: success")
 		bets, err := c.betParser.ReadBets(c.config.BatchSize, c.config.ID)
 		if err != nil {
 			if err == io.EOF {
@@ -121,16 +119,14 @@ func (c *Agency) StartAgency() {
 		}
 	}
 	c.sendMessage([]byte{EndMessageType})
-	//log.Infof("action: END_MESS_SENT | result: success")
 	c.sendMessage([]byte{AskWinnersType})
-	log.Infof("action: ASK_WINNERS_SENT | result: success")
 
 	reader := bufio.NewReader(c.conn)
 	var winners_amount = 0
 	for {
 		msgType, err := reader.ReadByte()
 		if err != nil {
-			log.Errorf("action: AAreceive_message | result: fail | agency_id: %v | error: %v",
+			log.Errorf("action: receive_message | result: fail | agency_id: %v | error: %v",
 				c.config.ID,
 				err,
 			)
