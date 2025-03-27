@@ -1,8 +1,7 @@
 package common
 
 import (
-	"bufio"
-	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
@@ -12,6 +11,8 @@ import (
 	"github.com/op/go-logging"
 )
 
+const EndMessageType = 0x02
+
 var log = logging.MustGetLogger("log")
 
 // AgencyConfig Configuration used by the agency
@@ -20,21 +21,14 @@ type AgencyConfig struct {
 	ServerAddress string
 	LoopAmount    int
 	LoopPeriod    time.Duration
-}
-
-type Bet struct {
-	Name      string
-	Surname   string
-	ID        string
-	Birthdate string
-	Number    string
+	BatchSize     int
 }
 
 // Agency Entity that encapsulates how
 type Agency struct {
-	config AgencyConfig
-	conn   net.Conn
-	bet    Bet
+	config    AgencyConfig
+	conn      net.Conn
+	betParser *BetParser
 }
 
 func (c *Agency) handleShutdown() {
@@ -54,15 +48,14 @@ func (c *Agency) handleShutdown() {
 // NewAgency Initializes a new agency receiving the configuration
 // as a parameter
 func NewAgency(config AgencyConfig) *Agency {
+	betParser, err := NewBetParser("./agency_bets.csv")
+	if err != nil {
+		log.Criticalf("action: initialize_bet_parser | result: fail | error: %v", err)
+		os.Exit(1)
+	}
 	agency := &Agency{
-		config: config,
-		bet: Bet{
-			Name:      os.Getenv("NOMBRE"),
-			Surname:   os.Getenv("APELLIDO"),
-			ID:        os.Getenv("DOCUMENTO"),
-			Birthdate: os.Getenv("NACIMIENTO"),
-			Number:    os.Getenv("NUMERO"),
-		},
+		config:    config,
+		betParser: betParser,
 	}
 	agency.handleShutdown()
 	return agency
@@ -84,13 +77,7 @@ func (c *Agency) createAgencySocket() error {
 	return nil
 }
 
-func (c *Agency) makeBet() error {
-	messageData := fmt.Sprintf("%s|%s|%s|%s|%s\n", c.bet.Name, c.bet.Surname, c.bet.ID, c.bet.Birthdate, c.bet.Number)
-
-	messageLength := uint8(len(messageData))
-
-	message := append([]byte{messageLength}, []byte(messageData)...)
-
+func (c *Agency) sendMessage(message []byte) error {
 	totalWritten := 0
 	for totalWritten < len(message) {
 		n, err := c.conn.Write(message[totalWritten:])
@@ -99,6 +86,7 @@ func (c *Agency) makeBet() error {
 		}
 		totalWritten += n
 	}
+	log.Infof("action: ENVIADO | result: success | BYTES: %v", totalWritten)
 	return nil
 }
 
@@ -111,25 +99,29 @@ func (c *Agency) StartAgency() {
 		return
 	}
 
-	err := c.makeBet()
-	if err != nil {
-		log.Errorf("action: apuesta_enviada | result: fail | dni: %v | error: %v",
-			c.bet.ID,
-			err,
-		)
-		return
-	}
+	for {
+		log.Infof("action: READ | result: success")
+		bets, err := c.betParser.ReadBets(c.config.BatchSize)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			log.Errorf("action: read_bet | result: fail | error: %v", err)
+			c.conn.Close()
+			return
+		}
 
-	msg, err := bufio.NewReader(c.conn).ReadString('\n')
-	if err != nil {
-		log.Errorf("action: receive_message | result: fail | agency_id: %v | error: %v",
-			c.config.ID,
-			err,
-		)
-		c.conn.Close()
-		return
+		err = c.sendMessage(serializeBets(bets))
+		if err != nil {
+			log.Errorf("action: apuesta_enviada | result: fail | error: %v", err)
+			return
+		}
+		log.Infof("action: SEMNT | result: success")
 	}
-	log.Infof("action: apuesta_enviada | result: success | dni: %v | numero: %v", c.bet.ID, msg)
+	c.sendMessage([]byte{EndMessageType})
 
+	log.Infof("action: apuesta_enviada | result: success")
+	c.betParser.Close()
 	c.conn.Close()
+	time.Sleep(100 * time.Millisecond)
 }

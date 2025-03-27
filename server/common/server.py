@@ -4,6 +4,8 @@ import signal
 import sys
 from common.utils import store_bets, Bet
 
+EndMessageType = 0x02
+
 class Server:
     def __init__(self, port, listen_backlog):
         # Initialize server socket
@@ -31,16 +33,34 @@ class Server:
             self.__handle_client_connection(client_sock)
 
     def __receive_bet_data(self, sock):
-        length_byte = sock.recv(1)
+        msg_type = sock.recv(1)  # Read Type (1 byte) + Length (2 bytes)
+        if msg_type == EndMessageType:  # END Message
+            return None
+        
+        header = sock.recv(2)
+        message_length = int.from_bytes(header[0:], "big")
+        if message_length == 0:
+            return None
 
-        message_length = ord(length_byte)
+        message = b""
+        while len(message) < message_length:
+            chunk = sock.recv(message_length - len(message))
+            if not chunk:
+                return None
+            message += chunk
 
-        parts = sock.recv(message_length).decode('utf-8').strip().split('|')
-        if len(parts) == 5:
-            name, surname, id, birthdate, number = parts
-            return Bet(0, name, surname, id, birthdate, number)
-        return None
+        data = message.decode("utf-8").strip().split("\n")
+        bets = []
+        for bet in data:
+            parts = bet.split("|")
+            if len(parts) == 5:
+                name, surname, id, birthdate, number = parts
+                bets.append(Bet(1, name, surname, id, birthdate, number))
 
+        return bets
+
+
+        
     def __handle_client_connection(self, client_sock):
         """
         Read message from a specific client socket and closes the socket
@@ -48,22 +68,20 @@ class Server:
         If a problem arises in the communication with the client, the
         client socket will also be closed
         """
-        try:
-            bet = self.__receive_bet_data(client_sock)
-            if not bet:
-                logging.error("action: apuesta_almacenada | result: fail")
-                return
-            addr = client_sock.getpeername()
-            store_bets([bet])
-            logging.info(f'action: apuesta_almacenada | result: success | ip: {addr[0]} | dni: {bet.document}')
+        while True:
+            try:
+                bets = self.__receive_bet_data(client_sock)
+                if not bets:
+                    break
+                
+                store_bets(bets)
+                logging.info(f'action: apuesta_recibida | result: success | cantidad: {len(bets)}')   
             
-            # TODO: Modify the send to avoid short-writes
-            client_sock.send("{}\n".format(bet.number).encode('utf-8'))
-        except OSError as e:
-            logging.error("action: receive_message | result: fail | error: {e}")
-        finally:
-            client_sock.close()
-            self._clients.remove(client_sock)
+            except OSError as e:
+                logging.error(f"action: receive_message | result: fail | error: {e}")
+        
+        client_sock.close()
+        self._clients.remove(client_sock)
 
     def __accept_new_connection(self):
         """
