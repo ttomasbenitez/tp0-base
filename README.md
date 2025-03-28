@@ -178,3 +178,56 @@ Se espera que se redacte una sección del README en donde se indique cómo ejecu
 Se proveen [pruebas automáticas](https://github.com/7574-sistemas-distribuidos/tp0-tests) de caja negra. Se exige que la resolución de los ejercicios pase tales pruebas, o en su defecto que las discrepancias sean justificadas y discutidas con los docentes antes del día de la entrega. El incumplimiento de las pruebas es condición de desaprobación, pero su cumplimiento no es suficiente para la aprobación. Respetar las entradas de log planteadas en los ejercicios, pues son las que se chequean en cada uno de los tests.
 
 La corrección personal tendrá en cuenta la calidad del código entregado y casos de error posibles, se manifiesten o no durante la ejecución del trabajo práctico. Se pide a los alumnos leer atentamente y **tener en cuenta** los criterios de corrección informados  [en el campus](https://campusgrado.fi.uba.ar/mod/page/view.php?id=73393).
+
+
+
+## Detalles de Implementación
+
+### Protocolo de Comunicación
+
+Como protocolo, el **Cliente** puede enviar 1 byte inicial en cada mensaje para indicar su tipo:
+
+| Tipo de mensaje | Descripción                              |
+|-----------------|------------------------------------------|
+| **0x01**        | Envío de datos                           |
+| **0x02**        | Fin de mensaje                           |
+| **0x03**        | Preguntar por ganadores                  |
+
+#### Estructura de los mensajes
+
+- **Envío de datos (0x01)**:  
+  El primer byte del mensaje es **0x01**, indicando que el mensaje contiene datos de apuestas. Los siguientes 2 bytes especifican la **longitud** en bytes de los datos del mensaje. El resto de los bytes son los datos de las apuestas, que se envían en el siguiente formato:
+
+ ```%agencia|%nombre|%apellido|%id|%nacimiento|%documento\n```
+
+Cada línea representa una apuesta y los campos están separados por el carácter `|`.
+
+- **Fin de mensaje (0x02)**: 
+El cliente envía este mensaje para indicar que ha terminado de enviar los datos de las apuestas. Este mensaje no incluye datos adicionales.
+
+- **Preguntar por ganadores (0x03)**: 
+El cliente envía este mensaje para solicitar los ganadores de las apuestas. El servidor responderá con los documentos de los ganadores.
+
+#### Respuesta del Servidor:
+
+- El **Servidor** responde con los documentos de los ganadores de las apuestas en el siguiente formato:
+```"%documento\n"```
+
+El primer byte de la respuesta es **0x01**, indicando que se está enviando un documento ganador.
+
+- Después de enviar los resultados, el servidor envía un mensaje de fin con el byte **0x02**.
+
+### Sincronización y Paralelismo
+
+Para lograr un verdadero paralelismo en Python, se utiliza el paquete **multiprocessing**, ya que los threads en Python no permiten la ejecución en paralelo debido al Global Interpreter Lock (GIL).
+
+A continuación se resumen los puntos clave:
+
+| Aspecto                     | Descripción                                                                                                   |
+|-----------------------------|---------------------------------------------------------------------------------------------------------------|
+| **Procesos**                | Se crean procesos independientes para ejecutar el código en paralelo, aprovechando múltiples núcleos.         |
+| **Recursos compartidos**    | Se utiliza un *manager* de `multiprocessing` para compartir un diccionario que asocia el ID de la agencia al socket (file descriptor). Esto es suficiente para compartir datos, pero no garantiza evitar condiciones de carrera en operaciones complejas. |
+| **Exclusión mutua (Locks)** | Se definen dos *locks*: uno para operaciones de archivo (dado que `store_bets` y `load_bets` no son thread-safe) y otro para asegurar la exclusión mutua al acceder o modificar el diccionario compartido de agencias. Cada proceso adquiere el lock que necesita en cada momento. |
+| **Sincronización (Barrier)**| Se utiliza una barrera para sincronizar a todos los procesos en el punto en que se recibe la solicitud de ganadores. Esto garantiza que se hayan procesado todas las apuestas antes de proceder al sorteo del ganador. |
+
+---
