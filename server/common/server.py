@@ -4,7 +4,11 @@ import signal
 import sys
 from common.utils import store_bets, Bet
 
-EndMessageType = 0x02
+DATA_MESSAGE_TYPE = b"\x01"
+END_MESSAGE_TYPE = b"\x02"
+
+MESS_TYPE_BYTES = 1
+MESS_LENGTH_BYTES = 2
 
 class Server:
     def __init__(self, port, listen_backlog):
@@ -25,19 +29,17 @@ class Server:
         finishes, servers starts to accept new connections again
         """
 
-        # TODO: Modify this program to handle signal to graceful shutdown
-        # the server
         while True:
             client_sock = self.__accept_new_connection()
             self._clients.append(client_sock)
             self.__handle_client_connection(client_sock)
 
     def __receive_bet_data(self, sock):
-        msg_type = sock.recv(1)  # Read Type (1 byte) + Length (2 bytes)
-        if msg_type == EndMessageType:  # END Message
+        msg_type = sock.recv(MESS_TYPE_BYTES)  # Read Type (1 byte) + Length (2 bytes)
+        if msg_type == END_MESSAGE_TYPE:  # END Message
             return None
         
-        header = sock.recv(2)
+        header = sock.recv(MESS_LENGTH_BYTES)
         message_length = int.from_bytes(header[0:], "big")
         if message_length == 0:
             return None
