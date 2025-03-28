@@ -9,34 +9,45 @@ DATA_MESSAGE_TYPE = b"\x01"
 END_MESSAGE_TYPE = b"\x02"
 ASK_WINNER_TYPE = b"\x03"
 
+MESS_TYPE_BYTES = 1
+MESS_LENGTH_BYTES = 2
+
 class Server:
     def __init__(self, port, listen_backlog, clients_amount):
+        """
+        Initializes the server, binds the socket to the given port, and sets up shared resources and locks.
+        """
         # Initialize server socket
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.bind(('', port))
         self._server_socket.listen(listen_backlog)
         self._clients_amount = clients_amount
-        self._waiting_clients = multiprocessing.Manager().list()
-        self._clients = multiprocessing.Manager().dict()
-        self._current_clients_count = 0
+        self._clients = []
 
+        # Shared resources
+        manager = multiprocessing.Manager()
+        self._agencies_ids = manager.dict()
+
+        # Locks for specific resources
+        self._file_lock = multiprocessing.Lock()           # For file operations (store_bets/load_bets)
+        self._agencies_ids_lock = multiprocessing.Lock()    # For _agencies_ids dict
+    
         signal.signal(signal.SIGTERM, self.__handle_shutdown)
 
     def run(self):
         """
-        Dummy Server loop
-
-        Server that accept new connections and establishes a
-        communication with a client. After client with communication
-        finishes, servers starts to accept new connections again
+        Main server loop to accept new client connections and handle them in separate processes.
+        Synchronizes all processes using a barrier.
         """
         processes = []
-        while len(self._waiting_clients) < self._clients_amount and self._current_clients_count < self._clients_amount:
+        sendWinnersBarrier = multiprocessing.Barrier(self._clients_amount)
+        
+        while len(self._clients) < self._clients_amount:
             client_sock = self.__accept_new_connection()
-            self._current_clients_count += 1
-
-            # Start a new process to handle the client
-            p = multiprocessing.Process(target=self.__handle_client_connection, args=(client_sock,))
+            self._clients.append(client_sock)
+            
+            # Start a new process to handle each client
+            p = multiprocessing.Process(target=self.__handle_client_connection, args=(client_sock, sendWinnersBarrier))
             p.start()
             processes.append(p)
 
@@ -44,24 +55,66 @@ class Server:
         for p in processes:
             p.join()
 
-        self.__send_winners(self._waiting_clients)
+        self.__handle_shutdown(None, None)
+
+    def __handle_client_connection(self, client_sock, sendWinnersBarrier):
+        """
+        Handles communication with a client: receives bet data, stores it, and waits for the barrier to send winners.
+        """
+        while True:
+            try:
+                bets = self.__receive_bet_data(client_sock)
+                if not bets:
+                    break
+
+                with self._file_lock:
+                    store_bets(bets)
+
+                logging.info(f'action: apuesta_recibida | result: success | cantidad: {len(bets)}')
+
+                with self._agencies_ids_lock:
+                    self._agencies_ids.setdefault(client_sock.fileno(), bets[0].agency)
+
+            except OSError as e:
+                logging.error(f"action: receive_message | result: fail | error: {e}")
+
+        self.__check_for_winner_request(client_sock, sendWinnersBarrier)
 
     def __receive_bet_data(self, sock):
-        msg_type = sock.recv(1)  # Read Type (1 byte) + Length (2 bytes)
+        """
+        Receives bet data from the client. Returns a list of Bet objects or None if no data is received.
+        Ensures no short reads by receiving the entire message.
+        """
+        msg_type = self.__recv_all(sock, MESS_TYPE_BYTES)
         if msg_type == END_MESSAGE_TYPE:
             logging.debug(f'action: END_MESS_RECEIVED | result: success')   
             return None
-        header = sock.recv(2)
+        
+        header = self.__recv_all(sock, MESS_LENGTH_BYTES)
         message_length = int.from_bytes(header[0:], "big")
         if message_length == 0:
             return None
 
-        message = b""
-        while len(message) < message_length:
-            chunk = sock.recv(message_length - len(message))
+        message = self.__recv_all(sock, message_length)
+        return self.__parse_bet_data(message)
+
+    def __recv_all(self, sock, size):
+        """
+        Helper function to ensure that the exact number of bytes is received.
+        """
+        data = b""
+        while len(data) < size:
+            chunk = sock.recv(size - len(data))
             if not chunk:
-                return None
-            message += chunk
+                logging.error('action: connection_ended | result: fail')
+                exit(1)
+            data += chunk
+        return data
+
+    def __parse_bet_data(self, message):
+        """
+        Parses bet data from the received message and returns a list of Bet objects.
+        """
         data = message.decode("utf-8").strip().split("\n")
         bets = []
         for bet in data:
@@ -71,57 +124,61 @@ class Server:
                 bets.append(Bet(agency, name, surname, id, birthdate, number))
         return bets
 
-    def __handle_client_connection(self, client_sock):
+    def __check_for_winner_request(self, client_sock, sendWinnersBarrier):
         """
-        Read message from a specific client socket and closes the socket
-
-        If a problem arises in the communication with the client, the
-        client socket will also be closed
+        Waits for the winner request from the client and ensures all processes reach the barrier before continuing.
         """
-        while True:
-            try:
-                bets = self.__receive_bet_data(client_sock)
-                if not bets:
-                    logging.debug(f'action: BREAK | result: success')
-                    break
-                
-                store_bets(bets)
-                self._clients[bets[0].agency] = client_sock
-                logging.info(f'action: apuesta_recibida | result: success | cantidad: {len(bets)}')   
-            
-            except OSError as e:
-                logging.error(f"action: receive_message | result: fail | error: {e}")
-
         try:
             msg_type = client_sock.recv(1)
             if msg_type == ASK_WINNER_TYPE:
-                self._waiting_clients.append(client_sock)
+                sendWinnersBarrier.wait()  # Ensure synchronization between all processes
+                self.__send_winners(client_sock)
         except OSError as e:
             logging.error(f"action: receive_message | result: fail | error: {e}")
-    
-    def __send_winners(self, clients_socks):
+
+    def __send_winners(self, client_sock):
+        """
+        Sends the winners to the requesting client after processing all bets.
+        Ensures no short writes by sending the entire message in chunks.
+        """
         logging.info(f'action: sorteo | result: success')
-        bets = load_bets()
-        winner_bets = [bet for bet in bets if has_won(bet)]
+
+        with self._file_lock:
+            bets = load_bets()
         
-        for winner_bet in winner_bets:
-            client_sock = self._clients[winner_bet.agency]
+        with self._agencies_ids_lock:
+            agency_id = self._agencies_ids[client_sock.fileno()]
+
+        agency_winner_bets = [bet for bet in bets if has_won(bet) and bet.agency == agency_id]
+        
+        for winner_bet in agency_winner_bets:
             self.__send_winner_to_client(client_sock, winner_bet)
         
-        for client_id, client_sock in self._clients.items():
-            client_sock.send(END_MESSAGE_TYPE)
+        client_sock.send(END_MESSAGE_TYPE)
 
     def __send_winner_to_client(self, client_sock, winner_bet):
-        """Send winner document to a specific client"""
-        client_sock.send(DATA_MESSAGE_TYPE + f"{winner_bet.document}\n".encode('utf-8'))
-        logging.debug(f"action: send_winner_to_client | result: success | winner_bet: {winner_bet}")
+        """
+        Sends a single winner bet to the client.
+        Ensures no short writes by sending all the data in chunks.
+        """
+        message = DATA_MESSAGE_TYPE + f"{winner_bet.document}\n".encode('utf-8')
+        self.__send_all(client_sock, message)
+
+    def __send_all(self, sock, data):
+        """
+        Helper function to ensure that all data is sent through the socket.
+        """
+        total_sent = 0
+        while total_sent < len(data):
+            sent = sock.send(data[total_sent:])
+            if sent == 0:
+                logging.error('action: connection_ended | result: fail')
+                exit(1)
+            total_sent += sent
 
     def __accept_new_connection(self):
         """
-        Accept new connections
-
-        Function blocks until a connection to a client is made.
-        Then connection created is printed and returned
+        Accepts new client connections and returns the client socket.
         """
         logging.info('action: accept_connections | result: in_progress')
         c, addr = self._server_socket.accept()
@@ -129,9 +186,12 @@ class Server:
         return c
     
     def __handle_shutdown(self, signum, frame):
-        for client in self._clients.values():
+        """
+        Closes all client connections and shuts down the server.
+        """
+        for client in self._clients:
             client.close()
-            
+
         self._server_socket.close()
         logging.info(f'action: server shutdown | result: success')
         sys.exit(0)
