@@ -11,7 +11,10 @@ import (
 	"github.com/op/go-logging"
 )
 
-const EndMessageType = 0x02
+const (
+	EndMessageType = 0x02
+	MaxBatchSize   = 8 * 1024 // 8 KB
+)
 
 var log = logging.MustGetLogger("log")
 
@@ -48,6 +51,10 @@ func (c *Agency) handleShutdown() {
 // NewAgency Initializes a new agency receiving the configuration
 // as a parameter
 func NewAgency(config AgencyConfig) *Agency {
+	if config.BatchSize > MaxBatchSize {
+		log.Warningf("BatchSize (%d) is greater than MaxBatchSize (%d). Setting to MaxBatchSize.", config.BatchSize, MaxBatchSize)
+		config.BatchSize = MaxBatchSize
+	}
 	betParser, err := NewBetParser("./agency_bets.csv")
 	if err != nil {
 		log.Criticalf("action: initialize_bet_parser | result: fail | error: %v", err)
