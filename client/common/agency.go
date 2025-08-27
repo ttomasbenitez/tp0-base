@@ -116,7 +116,7 @@ func (c *Agency) StartAgency() {
 			log.Errorf("action: apuesta_enviada | result: fail | error: %v", err)
 			return
 		}
-		log.Infof("action: SEMNT | result: success")
+		log.Infof("action: SENT | result: success")
 	}
 	c.sendMessage([]byte{EndMessageType})
 
