@@ -1,6 +1,7 @@
 package common
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -97,6 +98,19 @@ func (c *Agency) sendMessage(message []byte) error {
 	return nil
 }
 
+func (c *Agency) waitForServerConfirmation() error {
+	buf := make([]byte, 1)
+	_, err := c.conn.Read(buf)
+	if err != nil {
+		return err
+	}
+	if buf[0] != EndMessageType {
+		return fmt.Errorf("unexpected confirmation byte: %v", buf[0])
+	}
+	log.Infof("action: confirmation_received | result: success")
+	return nil
+}
+
 func (c *Agency) StartAgency() {
 	if err := c.createAgencySocket(); err != nil {
 		log.Errorf("action: connect | result: fail | agency_id: %v | error: %v",
@@ -126,6 +140,11 @@ func (c *Agency) StartAgency() {
 		log.Infof("action: SENT | result: success")
 	}
 	c.sendMessage([]byte{EndMessageType})
+
+	// Esperar confirmación del servidor antes de cerrar el socket
+	if err := c.waitForServerConfirmation(); err != nil {
+		log.Errorf("action: confirmation | result: fail | error: %v", err)
+	}
 
 	log.Infof("action: apuesta_enviada | result: success")
 	c.betParser.Close()

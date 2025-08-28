@@ -82,6 +82,12 @@ class Server:
             except OSError as e:
                 logging.error(f"action: receive_message | result: fail | error: {e}")
         
+        # Enviar END_MESSAGE_TYPE al cliente antes de cerrar el socket
+        try:
+            client_sock.sendall(END_MESSAGE_TYPE)
+        except Exception as e:
+            logging.error(f"action: send_end_message | result: fail | error: {e}")
+
         client_sock.close()
         self._clients.remove(client_sock)
 
