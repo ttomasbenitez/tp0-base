@@ -34,22 +34,31 @@ class Server:
             self._clients.append(client_sock)
             self.__handle_client_connection(client_sock)
 
+    def _recv_all(self, sock, nbytes):
+        """Read exactly nbytes from socket, handling short reads."""
+        data = b""
+        while len(data) < nbytes:
+            chunk = sock.recv(nbytes - len(data))
+            if not chunk:
+                return None
+            data += chunk
+        return data
+
     def __receive_bet_data(self, sock):
-        msg_type = sock.recv(MESS_TYPE_BYTES)  # Read Type (1 byte) + Length (2 bytes)
-        if msg_type == END_MESSAGE_TYPE:  # END Message
+        msg_type = self._recv_all(sock, MESS_TYPE_BYTES)
+        if msg_type is None or msg_type == END_MESSAGE_TYPE:
             return None
         
-        header = sock.recv(MESS_LENGTH_BYTES)
-        message_length = int.from_bytes(header[0:], "big")
+        header = self._recv_all(sock, MESS_LENGTH_BYTES)
+        if header is None:
+            return None
+        message_length = int.from_bytes(header, "big")
         if message_length == 0:
             return None
 
-        message = b""
-        while len(message) < message_length:
-            chunk = sock.recv(message_length - len(message))
-            if not chunk:
-                return None
-            message += chunk
+        message = self._recv_all(sock, message_length)
+        if message is None:
+            return None
 
         return self._parse_bets(message.decode("utf-8").strip())
 
@@ -103,5 +112,5 @@ class Server:
             client.close()
         self._server_socket.close()
         logging.info(f'action: server shutdown | result: success')
-        logging.shutdown()  # Flush logs before exit
+        logging.shutdown()
         sys.exit(0)
