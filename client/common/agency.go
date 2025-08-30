@@ -35,15 +35,18 @@ type Agency struct {
 	betParser *BetParser
 }
 
-func (c *Agency) handleShutdown() {
+func (a *Agency) handleShutdown() {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM)
 
 	go func() {
 		<-sigs
-		log.Infof("action: shutdown | result: success | agency_id: %v", c.config.ID)
-		if c.conn != nil {
-			c.conn.Close()
+		log.Infof("action: shutdown | result: success | agency_id: %v", a.config.ID)
+		if a.conn != nil {
+			a.conn.Close()
+		}
+		if a.betParser != nil {
+			a.betParser.Close()
 		}
 		os.Exit(0)
 	}()
@@ -72,23 +75,23 @@ func NewAgency(config AgencyConfig) *Agency {
 // CreateAgencySocket Initializes agency socket. In case of
 // failure, error is printed in stdout/stderr and exit 1
 // is returned
-func (c *Agency) createAgencySocket() error {
-	conn, err := net.Dial("tcp", c.config.ServerAddress)
+func (a *Agency) createAgencySocket() error {
+	conn, err := net.Dial("tcp", a.config.ServerAddress)
 	if err != nil {
 		log.Criticalf(
 			"action: connect | result: fail | client_id: %v | error: %v",
-			c.config.ID,
+			a.config.ID,
 			err,
 		)
 	}
-	c.conn = conn
+	a.conn = conn
 	return nil
 }
 
-func (c *Agency) sendMessage(message []byte) error {
+func (a *Agency) sendMessage(message []byte) error {
 	totalWritten := 0
 	for totalWritten < len(message) {
-		n, err := c.conn.Write(message[totalWritten:])
+		n, err := a.conn.Write(message[totalWritten:])
 		if err != nil {
 			return err
 		}
@@ -98,60 +101,48 @@ func (c *Agency) sendMessage(message []byte) error {
 	return nil
 }
 
-func (c *Agency) waitForServerConfirmation() error {
-	buf := make([]byte, 1)
-	_, err := c.conn.Read(buf)
-	if err != nil {
-		return err
+func (a *Agency) processBets() error {
+	for {
+		bets, err := a.betParser.ReadBets(a.config.BatchSize)
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return fmt.Errorf("failed to read bets: %w", err)
+		}
+		log.Infof("action: bets_read | result: success | count: %d", len(bets))
+
+		if err := a.sendMessage(serializeBets(bets)); err != nil {
+			return fmt.Errorf("failed to send batch: %w", err)
+		}
+		log.Infof("action: batch_sent | result: success")
 	}
-	if buf[0] != EndMessageType {
-		return fmt.Errorf("unexpected confirmation byte: %v", buf[0])
-	}
-	log.Infof("action: confirmation_received | result: success")
-	return nil
 }
 
-func (c *Agency) StartAgency() {
-	if err := c.createAgencySocket(); err != nil {
-		log.Errorf("action: connect | result: fail | agency_id: %v | error: %v",
-			c.config.ID,
-			err,
-		)
+func (a *Agency) StartAgency() {
+	if err := a.createAgencySocket(); err != nil {
+		log.Errorf("action: connect | result: fail | agency_id: %v | error: %v", a.config.ID, err)
 		return
 	}
 
 	defer func() {
-		if tcpConn, ok := c.conn.(*net.TCPConn); ok {
+		a.betParser.Close()
+		if tcpConn, ok := a.conn.(*net.TCPConn); ok {
 			tcpConn.CloseWrite()
 		}
-		c.conn.Close()
+		a.conn.Close()
 	}()
 
-	for {
-		log.Infof("action: READ | result: success")
-		bets, err := c.betParser.ReadBets(c.config.BatchSize)
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			log.Errorf("action: read_bet | result: fail | error: %v", err)
-			return
-		}
-
-		err = c.sendMessage(serializeBets(bets))
-		if err != nil {
-			log.Errorf("action: apuesta_enviada | result: fail | error: %v", err)
-			return
-		}
-		log.Infof("action: SENT | result: success")
+	if err := a.processBets(); err != nil {
+		log.Errorf("action: process_bets | result: fail | error: %v", err)
+		return
 	}
-	c.sendMessage([]byte{EndMessageType})
 
-	if err := c.waitForServerConfirmation(); err != nil {
-		log.Errorf("action: confirmation | result: fail | error: %v", err)
+	if err := a.sendMessage([]byte{EndMessageType}); err != nil {
+		log.Errorf("action: send_end_message | result: fail | error: %v", err)
+		return
 	}
 
 	log.Infof("action: apuesta_enviada | result: success")
-	c.betParser.Close()
-	//time.Sleep(300 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 }
