@@ -153,4 +153,5 @@ func (c *Agency) StartAgency() {
 
 	log.Infof("action: apuesta_enviada | result: success")
 	c.betParser.Close()
+	time.Sleep(300 * time.Millisecond)
 }
