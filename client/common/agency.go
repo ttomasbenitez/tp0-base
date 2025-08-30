@@ -120,6 +120,13 @@ func (c *Agency) StartAgency() {
 		return
 	}
 
+	defer func() {
+		if tcpConn, ok := c.conn.(*net.TCPConn); ok {
+			tcpConn.CloseWrite()
+		}
+		c.conn.Close()
+	}()
+
 	for {
 		log.Infof("action: READ | result: success")
 		bets, err := c.betParser.ReadBets(c.config.BatchSize)
@@ -128,7 +135,6 @@ func (c *Agency) StartAgency() {
 				break
 			}
 			log.Errorf("action: read_bet | result: fail | error: %v", err)
-			c.conn.Close()
 			return
 		}
 
@@ -141,13 +147,10 @@ func (c *Agency) StartAgency() {
 	}
 	c.sendMessage([]byte{EndMessageType})
 
-	// Esperar confirmación del servidor antes de cerrar el socket
 	if err := c.waitForServerConfirmation(); err != nil {
 		log.Errorf("action: confirmation | result: fail | error: %v", err)
 	}
 
 	log.Infof("action: apuesta_enviada | result: success")
 	c.betParser.Close()
-	c.conn.Close()
-	time.Sleep(100 * time.Millisecond)
 }
