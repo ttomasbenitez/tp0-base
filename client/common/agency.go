@@ -12,14 +12,17 @@ import (
 	"github.com/op/go-logging"
 )
 
-const DataMessageType = 0x01
-const EndMessageType = 0x02
-const AskWinnersType = 0x03
-const BetsDataPath = "./agency_bets.csv"
+const (
+	DataMessageType = 0x01
+	EndMessageType  = 0x02
+	AskWinnersType  = 0x03
+
+	BetsDataPath = "./agency_bets.csv"
+)
 
 var log = logging.MustGetLogger("log")
 
-// AgencyConfig Configuration used by the agency
+// AgencyConfig holds the configuration for an Agency
 type AgencyConfig struct {
 	ID            string
 	ServerAddress string
@@ -28,28 +31,16 @@ type AgencyConfig struct {
 	BatchSize     int
 }
 
-// Agency Entity that encapsulates how
+// Agency represents an agency instance
 type Agency struct {
 	config    AgencyConfig
 	conn      net.Conn
 	betParser *BetParser
 }
 
-// Listens for a termination signal (SIGTERM) and handles the graceful shutdown of the agency.
-// It closes the connection and exits the application upon receiving the shutdown signal.
-func (a *Agency) handleShutdown() {
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGTERM)
+// ---------------- Initialization ----------------
 
-	go func() {
-		<-sigs
-		a.Close()
-		os.Exit(0)
-	}()
-}
-
-// NewAgency Initializes a new agency receiving the configuration.
-// It also sets up the bet parser and handles the graceful shutdown of the agency via SIGTERM.
+// NewAgency creates a new Agency with config, bet parser and shutdown handler
 func NewAgency(config AgencyConfig) *Agency {
 	betParser, err := NewBetParser(BetsDataPath)
 	if err != nil {
@@ -64,27 +55,38 @@ func NewAgency(config AgencyConfig) *Agency {
 	return agency
 }
 
-// CreateAgencySocket Initializes agency socket. In case of
-// failure, error is printed in stdout/stderr and exit 1
-// is returned
+// handleShutdown listens for SIGTERM and gracefully shuts down the agency
+func (a *Agency) handleShutdown() {
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGTERM)
+
+	go func() {
+		<-sigs
+		a.Close()
+		os.Exit(0)
+	}()
+}
+
+// ---------------- Connection ----------------
+
+// createAgencySocket connects the agency to the server
 func (a *Agency) createAgencySocket() error {
 	conn, err := net.Dial("tcp", a.config.ServerAddress)
 	if err != nil {
-		log.Criticalf(
-			"action: connect | result: fail | client_id: %v | error: %v",
-			a.config.ID,
-			err,
-		)
+		log.Criticalf("action: connect | result: fail | agency_id: %v | error: %v",
+			a.config.ID, err)
 		if a.betParser != nil {
 			a.betParser.Close()
 		}
+		return err
 	}
 	a.conn = conn
 	return nil
 }
 
-// sendMessage sends a message over the connection in chunks, ensuring the entire message is written.
-// It retries writing until the message is fully sent or returns an error if something goes wrong.
+// ---------------- Messaging ----------------
+
+// sendMessage writes a full message to the server (handling partial writes)
 func (a *Agency) sendMessage(message []byte) error {
 	totalWritten := 0
 	for totalWritten < len(message) {
@@ -97,49 +99,9 @@ func (a *Agency) sendMessage(message []byte) error {
 	return nil
 }
 
-// AskWinners sends a request to the server asking for the winners.
-// It receives the number of winners via different messages, processes
-// them, and prints the result.
-func (a *Agency) receiveWinners() {
-	a.sendMessage([]byte{AskWinnersType})
+// ---------------- Bets ----------------
 
-	reader := bufio.NewReader(a.conn)
-	var winners_amount = 0
-	for {
-		msgType, err := reader.ReadByte()
-		if err != nil {
-			log.Errorf("action: receive_message | result: fail | agency_id: %v | error: %v",
-				a.config.ID,
-				err,
-			)
-			return
-		}
-
-		if msgType == EndMessageType {
-			break
-		}
-
-		if msgType == DataMessageType {
-			_, err := reader.ReadString('\n')
-			if err != nil {
-				log.Errorf("action: receive_message | result: fail | agency_id: %v | error: %v",
-					a.config.ID,
-					err,
-				)
-				return
-			}
-
-			winners_amount++
-		}
-	}
-
-	log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %v", winners_amount)
-}
-
-// sendBets reads bets from the file, serializes the data, and
-// sends them to the server in batches.
-// It continues reading and sending bets until EOF is reached
-// and sends a final message indicating the end of the bets data.
+// sendBets reads bets from file and sends them in batches
 func (a *Agency) sendBets() {
 	for {
 		bets, err := a.betParser.ReadBets(a.config.BatchSize, a.config.ID)
@@ -160,23 +122,54 @@ func (a *Agency) sendBets() {
 	a.sendMessage([]byte{EndMessageType})
 }
 
-func (a *Agency) StartAgency() {
-	if err := a.createAgencySocket(); err != nil {
-		log.Errorf("action: connect | result: fail | agency_id: %v | error: %v",
-			a.config.ID,
-			err,
-		)
-		os.Exit(1)
+// ---------------- Winners ----------------
+
+// receiveWinners asks server for winners and processes the response
+func (a *Agency) receiveWinners() {
+	a.sendMessage([]byte{AskWinnersType})
+
+	reader := bufio.NewReader(a.conn)
+	var winnersAmount = 0
+
+	for {
+		msgType, err := reader.ReadByte()
+		if err != nil {
+			log.Errorf("action: receive_message | result: fail | agency_id: %v | error: %v",
+				a.config.ID, err)
+			return
+		}
+
+		if msgType == EndMessageType {
+			break
+		}
+
+		if msgType == DataMessageType {
+			_, err := reader.ReadString('\n')
+			if err != nil {
+				log.Errorf("action: receive_message | result: fail | agency_id: %v | error: %v",
+					a.config.ID, err)
+				return
+			}
+			winnersAmount++
+		}
 	}
 
-	a.sendBets()
-	a.receiveWinners()
-
-	a.Close()
-	time.Sleep(300 * time.Millisecond)
+	log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %v", winnersAmount)
 }
 
-// Free resources.
+// ---------------- Lifecycle ----------------
+
+// StartAgency runs the agency lifecycle
+func (a *Agency) StartAgency() {
+	if err := a.createAgencySocket(); err != nil {
+		os.Exit(1)
+	}
+	a.sendBets()
+	a.receiveWinners()
+	a.Close()
+}
+
+// Close frees all resources
 func (a *Agency) Close() {
 	if a.conn != nil {
 		a.conn.Close()
