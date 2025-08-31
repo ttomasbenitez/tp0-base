@@ -2,6 +2,7 @@ package common
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -12,9 +13,12 @@ import (
 	"github.com/op/go-logging"
 )
 
-const DataMessageType = 0x01
-const EndMessageType = 0x02
-const AskWinnersType = 0x03
+const (
+	DataMessageType = 0x01
+	EndMessageType  = 0x02
+	AskWinnersType  = 0x03
+	MaxBatchSize    = 8 * 1024 // 8 KB
+)
 
 var log = logging.MustGetLogger("log")
 
@@ -34,15 +38,17 @@ type Agency struct {
 	betParser *BetParser
 }
 
-func (c *Agency) handleShutdown() {
+func (a *Agency) handleShutdown() {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM)
-
 	go func() {
 		<-sigs
-		log.Infof("action: shutdown | result: success | agency_id: %v", c.config.ID)
-		if c.conn != nil {
-			c.conn.Close()
+		log.Infof("action: shutdown | result: success | agency_id: %v", a.config.ID)
+		if a.conn != nil {
+			a.conn.Close()
+		}
+		if a.betParser != nil {
+			a.betParser.Close()
 		}
 		os.Exit(0)
 	}()
@@ -51,11 +57,17 @@ func (c *Agency) handleShutdown() {
 // NewAgency Initializes a new agency receiving the configuration
 // as a parameter
 func NewAgency(config AgencyConfig) *Agency {
+	if config.BatchSize > MaxBatchSize {
+		log.Warningf("BatchSize (%d) is greater than MaxBatchSize (%d). Setting to MaxBatchSize.", config.BatchSize, MaxBatchSize)
+		config.BatchSize = MaxBatchSize
+	}
+
 	betParser, err := NewBetParser("./agency_bets.csv")
 	if err != nil {
 		log.Criticalf("action: initialize_bet_parser | result: fail | error: %v", err)
 		os.Exit(1)
 	}
+
 	agency := &Agency{
 		config:    config,
 		betParser: betParser,
@@ -67,23 +79,23 @@ func NewAgency(config AgencyConfig) *Agency {
 // CreateAgencySocket Initializes agency socket. In case of
 // failure, error is printed in stdout/stderr and exit 1
 // is returned
-func (c *Agency) createAgencySocket() error {
-	conn, err := net.Dial("tcp", c.config.ServerAddress)
+func (a *Agency) createAgencySocket() error {
+	conn, err := net.Dial("tcp", a.config.ServerAddress)
 	if err != nil {
 		log.Criticalf(
 			"action: connect | result: fail | client_id: %v | error: %v",
-			c.config.ID,
+			a.config.ID,
 			err,
 		)
 	}
-	c.conn = conn
+	a.conn = conn
 	return nil
 }
 
-func (c *Agency) sendMessage(message []byte) error {
+func (a *Agency) sendMessage(message []byte) error {
 	totalWritten := 0
 	for totalWritten < len(message) {
-		n, err := c.conn.Write(message[totalWritten:])
+		n, err := a.conn.Write(message[totalWritten:])
 		if err != nil {
 			return err
 		}
@@ -92,45 +104,33 @@ func (c *Agency) sendMessage(message []byte) error {
 	return nil
 }
 
-func (c *Agency) StartAgency() {
-	if err := c.createAgencySocket(); err != nil {
-		log.Errorf("action: connect | result: fail | agency_id: %v | error: %v",
-			c.config.ID,
-			err,
-		)
-		return
-	}
-
+func (a *Agency) processBets() error {
 	for {
-		bets, err := c.betParser.ReadBets(c.config.BatchSize, c.config.ID)
+		bets, err := a.betParser.ReadBets(a.config.BatchSize, a.config.ID)
 		if err != nil {
 			if err == io.EOF {
-				break
+				return nil
 			}
 			log.Errorf("action: read_bet | result: fail | error: %v", err)
-			c.conn.Close()
-			return
+			return err
 		}
 
-		err = c.sendMessage(serializeBets(bets))
+		err = a.sendMessage(serializeBets(bets))
 		if err != nil {
 			log.Errorf("action: apuesta_enviada | result: fail | error: %v", err)
-			return
+			return err
 		}
 	}
-	c.sendMessage([]byte{EndMessageType})
-	c.sendMessage([]byte{AskWinnersType})
+}
 
-	reader := bufio.NewReader(c.conn)
-	var winners_amount = 0
+func (a *Agency) processWinners() (int, error) {
+	reader := bufio.NewReader(a.conn)
+	winnersAmount := 0
+
 	for {
 		msgType, err := reader.ReadByte()
 		if err != nil {
-			log.Errorf("action: receive_message | result: fail | agency_id: %v | error: %v",
-				c.config.ID,
-				err,
-			)
-			return
+			return 0, fmt.Errorf("failed to read message type: %w", err)
 		}
 
 		if msgType == EndMessageType {
@@ -140,19 +140,39 @@ func (c *Agency) StartAgency() {
 		if msgType == DataMessageType {
 			_, err := reader.ReadString('\n')
 			if err != nil {
-				log.Errorf("action: receive_message | result: fail | agency_id: %v | error: %v",
-					c.config.ID,
-					err,
-				)
-				return
+				return 0, fmt.Errorf("failed to read winner data: %w", err)
 			}
-
-			winners_amount++
+			winnersAmount++
 		}
 	}
 
-	log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %v", winners_amount)
-	c.betParser.Close()
-	c.conn.Close()
-	time.Sleep(300 * time.Millisecond)
+	return winnersAmount, nil
+}
+
+func (a *Agency) StartAgency() {
+	if err := a.createAgencySocket(); err != nil {
+		log.Errorf("action: connect | result: fail | agency_id: %v | error: %v", a.config.ID, err)
+		return
+	}
+
+	defer func() {
+		a.betParser.Close()
+		a.conn.Close()
+	}()
+
+	if err := a.processBets(); err != nil {
+		return
+	}
+
+	a.sendMessage([]byte{EndMessageType})
+	a.sendMessage([]byte{AskWinnersType})
+
+	winnersAmount, err := a.processWinners()
+	if err != nil {
+		log.Errorf("action: receive_message | result: fail | agency_id: %v | error: %v", a.config.ID, err)
+		return
+	}
+
+	log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %v", winnersAmount)
+	//time.Sleep(300 * time.Millisecond)
 }

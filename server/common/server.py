@@ -35,29 +35,44 @@ class Server:
         self.__send_winners()
         self.__handle_shutdown(None, None)
         
-    def __receive_bet_data(self, sock):
-        msg_type = sock.recv(1)  # Read Type (1 byte) + Length (2 bytes)
-        if msg_type == END_MESSAGE_TYPE:  # END Message
-            return None
-        header = sock.recv(2)
-        message_length = int.from_bytes(header[0:], "big")
-        if message_length == 0:
-            return None
-
-        message = b""
-        while len(message) < message_length:
-            chunk = sock.recv(message_length - len(message))
+    def _recv_all(self, sock, nbytes):
+        """Read exactly nbytes from socket, handling short reads."""
+        data = b""
+        while len(data) < nbytes:
+            chunk = sock.recv(nbytes - len(data))
             if not chunk:
                 return None
-            message += chunk
-        data = message.decode("utf-8").strip().split("\n")
+            data += chunk
+        return data
+
+    def _parse_bets(self, bets_str):
+        """Parse bet data from string format."""
         bets = []
-        for bet in data:
+        for bet in bets_str.split("\n"):
             parts = bet.split("|")
-            if len(parts) == 6:
+            if len(parts) == 6:  # Mantiene las 6 partes del original
                 agency, name, surname, id, birthdate, number = parts
                 bets.append(Bet(agency, name, surname, id, birthdate, number))
         return bets
+
+    def __receive_bet_data(self, sock):
+        """Receive and parse bet data from socket."""
+        msg_type = self._recv_all(sock, 1)  # Read Type (1 byte)
+        if msg_type is None or msg_type == END_MESSAGE_TYPE:  # END Message
+            return None
+
+        header = self._recv_all(sock, 2)  # Read Length (2 bytes)
+        if header is None:
+            return None
+        message_length = int.from_bytes(header, "big")
+        if message_length == 0:
+            return None
+
+        message = self._recv_all(sock, message_length)
+        if message is None:
+            return None
+
+        return self._parse_bets(message.decode("utf-8").strip())
 
     def __handle_client_connection(self, client_sock):
         """
@@ -81,9 +96,9 @@ class Server:
                 logging.error(f"action: receive_message | result: fail | error: {e}")
         
         try:
-                msg_type = client_sock.recv(1)
-                if msg_type == ASK_WINNER_TYPE:
-                    self._waiting_clients.append(client_sock)
+            msg_type = client_sock.recv(1)
+            if msg_type == ASK_WINNER_TYPE:
+                self._waiting_clients.append(client_sock)
         except OSError as e:
             logging.error(f"action: receive_message | result: fail | error: {e}")
     
