@@ -109,10 +109,10 @@ class Server:
 
         for winner_bet in winner_bets:
             client_sock = self._clients[winner_bet.agency]
-            client_sock.send(DATA_MESSAGE_TYPE + f"{winner_bet.document}\n".encode('utf-8'))
+            client_sock.sendall(DATA_MESSAGE_TYPE + f"{winner_bet.document}\n".encode('utf-8'))
 
         for client_sock in self._clients.values():
-            client_sock.send(END_MESSAGE_TYPE)
+            client_sock.sendall(END_MESSAGE_TYPE)
 
     def __accept_new_connection(self):
         """

@@ -174,5 +174,4 @@ func (a *Agency) StartAgency() {
 	}
 
 	log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %v", winnersAmount)
-	//time.Sleep(300 * time.Millisecond)
 }
