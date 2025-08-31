@@ -57,47 +57,6 @@ class Server:
 
         self.__handle_shutdown(None, None)
 
-    def __handle_client_connection(self, client_sock, sendWinnersBarrier):
-        """
-        Handles communication with a client: receives bet data, stores it, and waits for the barrier to send winners.
-        """
-        while True:
-            try:
-                bets = self.__receive_bet_data(client_sock)
-                if not bets:
-                    break
-
-                with self._file_lock:
-                    store_bets(bets)
-
-                logging.info(f'action: apuesta_recibida | result: success | cantidad: {len(bets)}')
-
-                with self._agencies_ids_lock:
-                    self._agencies_ids.setdefault(client_sock.fileno(), bets[0].agency)
-
-            except OSError as e:
-                logging.error(f"action: receive_message | result: fail | error: {e}")
-
-        self.__check_for_winner_request(client_sock, sendWinnersBarrier)
-
-    def __receive_bet_data(self, sock):
-        """
-        Receives bet data from the client. Returns a list of Bet objects or None if no data is received.
-        Ensures no short reads by receiving the entire message.
-        """
-        msg_type = self.__recv_all(sock, MESS_TYPE_BYTES)
-        if msg_type == END_MESSAGE_TYPE:
-            logging.debug(f'action: END_MESS_RECEIVED | result: success')   
-            return None
-        
-        header = self.__recv_all(sock, MESS_LENGTH_BYTES)
-        message_length = int.from_bytes(header[0:], "big")
-        if message_length == 0:
-            return None
-
-        message = self.__recv_all(sock, message_length)
-        return self.__parse_bet_data(message)
-
     def __recv_all(self, sock, size):
         """
         Helper function to ensure that the exact number of bytes is received.
@@ -124,6 +83,46 @@ class Server:
                 bets.append(Bet(agency, name, surname, id, birthdate, number))
         return bets
 
+    def __receive_bet_data(self, sock):
+        """
+        Receives bet data from the client. Returns a list of Bet objects or None if no data is received.
+        Ensures no short reads by receiving the entire message.
+        """
+        msg_type = self.__recv_all(sock, MESS_TYPE_BYTES)
+        if msg_type == END_MESSAGE_TYPE:
+            logging.debug(f'action: END_MESS_RECEIVED | result: success')   
+            return None
+        
+        header = self.__recv_all(sock, MESS_LENGTH_BYTES)
+        message_length = int.from_bytes(header[0:], "big")
+        if message_length == 0:
+            return None
+
+        message = self.__recv_all(sock, message_length)
+        return self.__parse_bet_data(message)
+
+    def __process_bets(self, client_sock):
+        """
+        Process all incoming bet data from client.
+        """
+        while True:
+            try:
+                bets = self.__receive_bet_data(client_sock)
+                if not bets:
+                    break
+
+                with self._file_lock:
+                    store_bets(bets)
+
+                logging.info(f'action: apuesta_recibida | result: success | cantidad: {len(bets)}')
+
+                with self._agencies_ids_lock:
+                    self._agencies_ids.setdefault(client_sock.fileno(), bets[0].agency)
+
+            except OSError as e:
+                logging.error(f"action: receive_message | result: fail | error: {e}")
+                break
+
     def __check_for_winner_request(self, client_sock, sendWinnersBarrier):
         """
         Waits for the winner request from the client and ensures all processes reach the barrier before continuing.
@@ -136,10 +135,31 @@ class Server:
         except OSError as e:
             logging.error(f"action: receive_message | result: fail | error: {e}")
 
+    def __handle_client_connection(self, client_sock, sendWinnersBarrier):
+        """
+        Handles communication with a client: receives bet data, stores it, and waits for the barrier to send winners.
+        """
+        self.__process_bets(client_sock)
+        self.__check_for_winner_request(client_sock, sendWinnersBarrier)
+
+    def __send_winner_to_client(self, client_sock, winner_bet):
+        """
+        Sends a single winner bet to the client.
+        Uses sendall to handle short writes automatically.
+        """
+        message = DATA_MESSAGE_TYPE + f"{winner_bet.document}\n".encode('utf-8')
+        client_sock.sendall(message)
+
+    def __send_end_message(self, client_sock):
+        """
+        Send end message to client.
+        """
+        client_sock.sendall(END_MESSAGE_TYPE)
+
     def __send_winners(self, client_sock):
         """
         Sends the winners to the requesting client after processing all bets.
-        Ensures no short writes by sending the entire message in chunks.
+        Uses sendall to handle short writes automatically.
         """
         logging.info(f'action: sorteo | result: success')
 
@@ -154,27 +174,7 @@ class Server:
         for winner_bet in agency_winner_bets:
             self.__send_winner_to_client(client_sock, winner_bet)
         
-        client_sock.send(END_MESSAGE_TYPE)
-
-    def __send_winner_to_client(self, client_sock, winner_bet):
-        """
-        Sends a single winner bet to the client.
-        Ensures no short writes by sending all the data in chunks.
-        """
-        message = DATA_MESSAGE_TYPE + f"{winner_bet.document}\n".encode('utf-8')
-        self.__send_all(client_sock, message)
-
-    def __send_all(self, sock, data):
-        """
-        Helper function to ensure that all data is sent through the socket.
-        """
-        total_sent = 0
-        while total_sent < len(data):
-            sent = sock.send(data[total_sent:])
-            if sent == 0:
-                logging.error('action: connection_ended | result: fail')
-                exit(1)
-            total_sent += sent
+        self.__send_end_message(client_sock)
 
     def __accept_new_connection(self):
         """
