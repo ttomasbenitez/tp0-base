@@ -37,15 +37,15 @@ type Agency struct {
 	bet    Bet
 }
 
-func (c *Agency) handleShutdown() {
+func (a *Agency) handleShutdown() {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM)
 
 	go func() {
 		<-sigs
-		log.Infof("action: shutdown | result: success | agency_id: %v", c.config.ID)
-		if c.conn != nil {
-			c.conn.Close()
+		log.Infof("action: shutdown | result: success | agency_id: %v", a.config.ID)
+		if a.conn != nil {
+			a.conn.Close()
 		}
 		os.Exit(0)
 	}()
@@ -71,65 +71,69 @@ func NewAgency(config AgencyConfig) *Agency {
 // CreateAgencySocket Initializes agency socket. In case of
 // failure, error is printed in stdout/stderr and exit 1
 // is returned
-func (c *Agency) createAgencySocket() error {
-	conn, err := net.Dial("tcp", c.config.ServerAddress)
+func (a *Agency) createAgencySocket() error {
+	conn, err := net.Dial("tcp", a.config.ServerAddress)
 	if err != nil {
 		log.Criticalf(
 			"action: connect | result: fail | client_id: %v | error: %v",
-			c.config.ID,
+			a.config.ID,
 			err,
 		)
+		return err
 	}
-	c.conn = conn
+	a.conn = conn
 	return nil
 }
 
-func (c *Agency) makeBet() error {
-	messageData := fmt.Sprintf("%s|%s|%s|%s|%s\n", c.bet.Name, c.bet.Surname, c.bet.ID, c.bet.Birthdate, c.bet.Number)
+func (a *Agency) sendBet() error {
+	messageData := fmt.Sprintf(
+		"%s|%s|%s|%s|%s\n",
+		a.bet.Name,
+		a.bet.Surname,
+		a.bet.ID,
+		a.bet.Birthdate,
+		a.bet.Number,
+	)
 
 	messageLength := uint8(len(messageData))
-
 	message := append([]byte{messageLength}, []byte(messageData)...)
 
 	totalWritten := 0
 	for totalWritten < len(message) {
-		n, err := c.conn.Write(message[totalWritten:])
+		n, err := a.conn.Write(message[totalWritten:])
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to send bet: %w", err)
 		}
 		totalWritten += n
 	}
 	return nil
 }
 
-func (c *Agency) StartAgency() {
-	if err := c.createAgencySocket(); err != nil {
-		log.Errorf("action: connect | result: fail | agency_id: %v | error: %v",
-			c.config.ID,
-			err,
-		)
-		return
-	}
-
-	err := c.makeBet()
+func (a *Agency) receiveResponse() (string, error) {
+	msg, err := bufio.NewReader(a.conn).ReadString('\n')
 	if err != nil {
-		log.Errorf("action: apuesta_enviada | result: fail | dni: %v | error: %v",
-			c.bet.ID,
-			err,
-		)
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+	return msg, nil
+}
+
+func (a *Agency) StartAgency() {
+	if err := a.createAgencySocket(); err != nil {
+		log.Errorf("action: connect | result: fail | agency_id: %v | error: %v", a.config.ID, err)
+		return
+	}
+	defer a.conn.Close()
+
+	if err := a.sendBet(); err != nil {
+		log.Errorf("action: apuesta_enviada | result: fail | dni: %v | error: %v", a.bet.ID, err)
 		return
 	}
 
-	msg, err := bufio.NewReader(c.conn).ReadString('\n')
+	msg, err := a.receiveResponse()
 	if err != nil {
-		log.Errorf("action: receive_message | result: fail | agency_id: %v | error: %v",
-			c.config.ID,
-			err,
-		)
-		c.conn.Close()
+		log.Errorf("action: receive_message | result: fail | agency_id: %v | error: %v", a.config.ID, err)
 		return
 	}
-	log.Infof("action: apuesta_enviada | result: success | dni: %v | numero: %v", c.bet.ID, msg)
 
-	c.conn.Close()
+	log.Infof("action: apuesta_enviada | result: success | dni: %v | numero: %v", a.bet.ID, msg)
 }
