@@ -144,5 +144,4 @@ func (a *Agency) StartAgency() {
 	}
 
 	log.Infof("action: apuesta_enviada | result: success")
-	time.Sleep(300 * time.Millisecond)
 }
