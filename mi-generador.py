@@ -1,5 +1,7 @@
 import sys
 
+EXPECTED_ARGS = 3
+
 def generar_compose(archivo_salida, cantidad_clientes):
     cantidad = int(cantidad_clientes)
     
@@ -43,7 +45,7 @@ networks:
         f.write(compose_yaml)
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
+    if len(sys.argv) != EXPECTED_ARGS:
         print("Uso: mi-generador.py <archivo_salida> <cantidad_clientes>")
         sys.exit(1)
     
