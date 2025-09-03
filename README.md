@@ -108,6 +108,16 @@ El script deberá ubicarse en la raíz del proyecto. Netcat no debe ser instalad
 ### Ejercicio N°4:
 Modificar servidor y cliente para que ambos sistemas terminen de forma _graceful_ al recibir la signal SIGTERM. Terminar la aplicación de forma _graceful_ implica que todos los _file descriptors_ (entre los que se encuentran archivos, sockets, threads y procesos) deben cerrarse correctamente antes que el thread de la aplicación principal muera. Loguear mensajes en el cierre de cada recurso (hint: Verificar que hace el flag `-t` utilizado en el comando `docker compose down`).
 
+**Resolución**
+Actualmente, tanto el servidor como el cliente esperan señales SIGTERM.
+
+En Python (servidor), se registra un handler en el hilo principal usando signal.signal. Cuando llega la señal, el hilo principal ejecuta el handler que cierra todos los recursos abiertos (sockets) y luego permite que la aplicación termine naturalmente.
+
+En Go (cliente), se lanza un goroutine en background que escucha la señal. Cuando se recibe SIGTERM, la goroutine cierra la conexión y registra los logs, mientras el hilo principal sigue ejecutando normalmente hasta que termina su loop.
+
+De esta forma, ambos sistemas realizan un cierre graceful, liberando correctamente todos los recursos y registrando logs de cada cierre antes de que la aplicación finalice.
+
+
 ## Parte 2: Repaso de Comunicaciones
 
 Las secciones de repaso del trabajo práctico plantean un caso de uso denominado **Lotería Nacional**. Para la resolución de las mismas deberá utilizarse como base el código fuente provisto en la primera parte, con las modificaciones agregadas en el ejercicio 4.

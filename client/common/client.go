@@ -4,10 +4,10 @@ import (
 	"bufio"
 	"fmt"
 	"net"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
-    "os"
-    "os/signal"
-    "syscall"
 
 	"github.com/op/go-logging"
 )
@@ -29,17 +29,16 @@ type Client struct {
 }
 
 func (c *Client) handleShutdown() {
-    sigs := make(chan os.Signal, 1)
-    signal.Notify(sigs, syscall.SIGTERM)
-    
-    go func() {
-        <-sigs
-        log.Infof("action: shutdown | result: success | client_id: %v", c.config.ID)
-        if c.conn != nil {
-            c.conn.Close()
-        }
-        os.Exit(0)
-    }()
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGTERM)
+
+	go func() {
+		<-sigs
+		log.Infof("action: shutdown | result: success | client_id: %v", c.config.ID)
+		if c.conn != nil {
+			c.conn.Close()
+		}
+	}()
 }
 
 // NewClient Initializes a new client receiving the configuration
