@@ -104,6 +104,10 @@ En caso de que la validación sea exitosa imprimir: `action: test_echo_server | 
 
 El script deberá ubicarse en la raíz del proyecto. Netcat no debe ser instalado en la máquina _host_ y no se pueden exponer puertos del servidor para realizar la comunicación (hint: `docker network`). `
 
+**Resolución**
+
+El script utiliza la imagen `busybox:latest` porque es muy liviana y ya incluye utilidades básicas como `nc` (netcat), evitando tener que instalar netcat en la máquina host. Netcat se usa para abrir una conexión TCP hacia el servidor en el puerto `12345`, de manera que al ejecutar `echo "$MESSAGE" | nc $SERVER` se envía el mensaje al servidor y, al tratarse de un echo server, se espera recibir exactamente el mismo mensaje de vuelta. Además, el contenedor de BusyBox se ejecuta dentro de la red `testing_net`, la cual está definida en el `docker-compose` y permite que los contenedores se comuniquen entre sí usando sus nombres como hostnames, sin necesidad de exponer puertos al host. De esta forma, el script lanza un contenedor efímero, envía un mensaje al servidor y valida que la respuesta coincida para confirmar que el echo server funciona correctamente.
+
 
 ### Ejercicio N°4:
 Modificar servidor y cliente para que ambos sistemas terminen de forma _graceful_ al recibir la signal SIGTERM. Terminar la aplicación de forma _graceful_ implica que todos los _file descriptors_ (entre los que se encuentran archivos, sockets, threads y procesos) deben cerrarse correctamente antes que el thread de la aplicación principal muera. Loguear mensajes en el cierre de cada recurso (hint: Verificar que hace el flag `-t` utilizado en el comando `docker compose down`).
