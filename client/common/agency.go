@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -33,6 +34,8 @@ type Agency struct {
 	config    AgencyConfig
 	conn      net.Conn
 	betParser *BetParser
+	mutex     sync.Mutex
+	shutdown  bool
 }
 
 func (a *Agency) handleShutdown() {
@@ -41,6 +44,10 @@ func (a *Agency) handleShutdown() {
 
 	go func() {
 		<-sigs
+		a.mutex.Lock()
+		a.shutdown = true
+		a.mutex.Unlock()
+
 		log.Infof("action: shutdown | result: success | agency_id: %v", a.config.ID)
 		if a.conn != nil {
 			a.conn.Close()
@@ -48,7 +55,6 @@ func (a *Agency) handleShutdown() {
 		if a.betParser != nil {
 			a.betParser.Close()
 		}
-		os.Exit(0)
 	}()
 }
 
@@ -86,6 +92,12 @@ func (a *Agency) createAgencySocket() error {
 	}
 	a.conn = conn
 	return nil
+}
+
+func (a *Agency) isShutdown() bool {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	return a.shutdown
 }
 
 func (a *Agency) sendMessage(message []byte) error {
@@ -132,6 +144,10 @@ func (a *Agency) StartAgency() {
 		}
 		a.conn.Close()
 	}()
+
+	if a.isShutdown() {
+		return
+	}
 
 	if err := a.processBets(); err != nil {
 		log.Errorf("action: process_bets | result: fail | error: %v", err)

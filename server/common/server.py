@@ -4,6 +4,8 @@ import signal
 import sys
 from common.utils import store_bets, Bet
 
+EXPECTED_BET_FIELDS = 5
+
 DATA_MESSAGE_TYPE = b"\x01"
 END_MESSAGE_TYPE = b"\x02"
 
@@ -16,6 +18,7 @@ class Server:
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.bind(('', port))
         self._server_socket.listen(listen_backlog)
+        self._running = True
         self._clients = []
 
         signal.signal(signal.SIGTERM, self.__handle_shutdown)
@@ -29,10 +32,16 @@ class Server:
         finishes, servers starts to accept new connections again
         """
 
-        while True:
-            client_sock = self.__accept_new_connection()
-            self._clients.append(client_sock)
-            self.__handle_client_connection(client_sock)
+        while self._running:
+            try:
+                client_sock = self.__accept_new_connection()
+                self._clients.append(client_sock)
+                self.__handle_client_connection(client_sock)
+            except OSError as e:
+                if self._running:
+                    logging.error(f'action: accept_connections | result: fail | error: {e}')
+                else:
+                    break
 
     def _recv_all(self, sock, nbytes):
         """Read exactly nbytes from socket, handling short reads."""
@@ -66,7 +75,7 @@ class Server:
         bets = []
         for bet in bets_str.split("\n"):
             parts = bet.split("|")
-            if len(parts) == 5:
+            if len(parts) == EXPECTED_BET_FIELDS:
                 name, surname, id, birthdate, number = parts
                 bets.append(Bet(1, name, surname, id, birthdate, number))
         return bets
@@ -108,9 +117,8 @@ class Server:
         return c
 
     def __handle_shutdown(self, signum, frame):
+        self._running = False
         for client in self._clients:
             client.close()
         self._server_socket.close()
         logging.info(f'action: server shutdown | result: success')
-        logging.shutdown()
-        sys.exit(0)
