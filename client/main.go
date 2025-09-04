@@ -4,11 +4,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/7574-sistemas-distribuidos/docker-compose-init/client/common"
 	"github.com/op/go-logging"
-	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 )
 
@@ -46,10 +44,6 @@ func InitConfig() (*viper.Viper, error) {
 
 	// Parse time.Duration variables and return an error if those variables cannot be parsed
 
-	if _, err := time.ParseDuration(v.GetString("loop.period")); err != nil {
-		return nil, errors.Wrapf(err, "Could not parse CLI_LOOP_PERIOD env var as time.Duration.")
-	}
-
 	return v, nil
 }
 
@@ -78,7 +72,7 @@ func InitLogger(logLevel string) error {
 // PrintConfig Print all the configuration parameters of the program.
 // For debugging purposes only
 func PrintConfig(v *viper.Viper) {
-	log.Infof("action: config | result: success | client_id: %s | server_address: %s | loop_amount: %v | loop_period: %v | log_level: %s",
+	log.Infof("action: config | result: success | client_id: %s | server_address: %s | log_level: %s",
 		v.GetString("id"),
 		v.GetString("server.address"),
 		v.GetString("log.level"),
