@@ -147,6 +147,10 @@ La cantidad máxima de apuestas dentro de cada _batch_ debe ser configurable des
 
 Por su parte, el servidor deberá responder con éxito solamente si todas las apuestas del _batch_ fueron procesadas correctamente.
 
+**Resolución**
+Los clientes se conectan uno a uno al servidor y envían sus apuestas en batches, cada uno con un tamaño máximo configurado. El servidor recibe cada batch, lo valida y lo guarda; si todas las apuestas del batch son correctas registra en el log que la acción fue exitosa junto con la cantidad de apuestas, y si hay algún error registra que falló y devuelve un código de error al cliente. Para el servidor, cada batch llega como un mensaje de tipo DATA\_MESSAGE\_TYPE, y cuando el cliente ya no tiene más apuestas envía un mensaje END\_MESSAGE\_TYPE, que indica que no habrá más batches. Así, el servidor sabe cuándo terminó la transmisión de cada cliente. El protocolo de respuesta del servidor no envía un ACK explícito por cada batch, sino que registra en el log el resultado del procesamiento y, en caso de error, devuelve un código de error que indica que el batch falló.
+
+
 ### Ejercicio N°7:
 
 Modificar los clientes para que notifiquen al servidor al finalizar con el envío de todas las apuestas y así proceder con el sorteo.

@@ -98,10 +98,6 @@ class Server:
                 except OSError as e:
                     logging.error(f"action: receive_message | result: fail | error: {e}")
                     break
-            try:
-                client_sock.sendall(END_MESSAGE_TYPE)
-            except Exception as e:
-                logging.error(f"action: send_end_message | result: fail | error: {e}")
         finally:
             client_sock.close()
             if client_sock in self._clients:
