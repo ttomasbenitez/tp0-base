@@ -5,6 +5,8 @@ import sys
 import multiprocessing
 from common.utils import store_bets, load_bets, has_won, Bet
 
+EXPECTED_BET_FIELDS = 6
+
 DATA_MESSAGE_TYPE = b"\x01"
 END_MESSAGE_TYPE = b"\x02"
 ASK_WINNER_TYPE = b"\x03"
@@ -21,6 +23,8 @@ class Server:
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.bind(('', port))
         self._server_socket.listen(listen_backlog)
+        self._running = True
+        self._processes = []
         self._clients_amount = clients_amount
         self._clients = []
 
@@ -39,23 +43,25 @@ class Server:
         Main server loop to accept new client connections and handle them in separate processes.
         Synchronizes all processes using a barrier.
         """
-        processes = []
         sendWinnersBarrier = multiprocessing.Barrier(self._clients_amount)
         
-        while len(self._clients) < self._clients_amount:
-            client_sock = self.__accept_new_connection()
-            self._clients.append(client_sock)
-            
-            # Start a new process to handle each client
-            p = multiprocessing.Process(target=self.__handle_client_connection, args=(client_sock, sendWinnersBarrier))
-            p.start()
-            processes.append(p)
+        while self._running and len(self._clients) < self._clients_amount:
+            try:
+                client_sock = self.__accept_new_connection()
+                self._clients.append(client_sock)
 
-        # Wait for all processes to finish
-        for p in processes:
-            p.join()
+                # Start a new process to handle each client
+                p = multiprocessing.Process(target=self.__handle_client_connection, args=(client_sock, sendWinnersBarrier))
+                p.start()
+                self._processes.append(p)
+            except OSError as e:
+                if self._running:
+                    logging.error(f'action: accept_connections | result: fail | error: {e}')
+                else:
+                    break
 
         self.__handle_shutdown(None, None)
+
 
     def __recv_all(self, sock, size):
         """
@@ -78,7 +84,7 @@ class Server:
         bets = []
         for bet in data:
             parts = bet.split("|")
-            if len(parts) == 6:
+            if len(parts) == EXPECTED_BET_FIELDS:
                 agency, name, surname, id, birthdate, number = parts
                 bets.append(Bet(agency, name, surname, id, birthdate, number))
         return bets
@@ -189,9 +195,13 @@ class Server:
         """
         Closes all client connections and shuts down the server.
         """
+        self._running = False
         for client in self._clients:
             client.close()
 
+        # Wait for all client handler processes to finish
+        for p in getattr(self, "_processes", []):
+            p.join()
+
         self._server_socket.close()
         logging.info(f'action: server shutdown | result: success')
-        sys.exit(0)

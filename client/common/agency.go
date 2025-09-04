@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -36,9 +37,9 @@ type Agency struct {
 	config    AgencyConfig
 	conn      net.Conn
 	betParser *BetParser
+	mutex     sync.Mutex
+	shutdown  bool
 }
-
-// ---------------- Initialization ----------------
 
 // NewAgency creates a new Agency with config, bet parser and shutdown handler
 func NewAgency(config AgencyConfig) *Agency {
@@ -62,12 +63,14 @@ func (a *Agency) handleShutdown() {
 
 	go func() {
 		<-sigs
+
+		a.mutex.Lock()
+		a.shutdown = true
+		a.mutex.Unlock()
+
 		a.Close()
-		os.Exit(0)
 	}()
 }
-
-// ---------------- Connection ----------------
 
 // createAgencySocket connects the agency to the server
 func (a *Agency) createAgencySocket() error {
@@ -84,7 +87,11 @@ func (a *Agency) createAgencySocket() error {
 	return nil
 }
 
-// ---------------- Messaging ----------------
+func (a *Agency) isShutdown() bool {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	return a.shutdown
+}
 
 // sendMessage writes a full message to the server (handling partial writes)
 func (a *Agency) sendMessage(message []byte) error {
@@ -99,11 +106,13 @@ func (a *Agency) sendMessage(message []byte) error {
 	return nil
 }
 
-// ---------------- Bets ----------------
-
 // sendBets reads bets from file and sends them in batches
 func (a *Agency) sendBets() {
 	for {
+		if a.isShutdown() {
+			return
+		}
+
 		bets, err := a.betParser.ReadBets(a.config.BatchSize, a.config.ID)
 		if err != nil {
 			if err == io.EOF {
@@ -122,8 +131,6 @@ func (a *Agency) sendBets() {
 	a.sendMessage([]byte{EndMessageType})
 }
 
-// ---------------- Winners ----------------
-
 // receiveWinners asks server for winners and processes the response
 func (a *Agency) receiveWinners() {
 	a.sendMessage([]byte{AskWinnersType})
@@ -132,6 +139,9 @@ func (a *Agency) receiveWinners() {
 	var winnersAmount = 0
 
 	for {
+		if a.isShutdown() {
+			return
+		}
 		msgType, err := reader.ReadByte()
 		if err != nil {
 			log.Errorf("action: receive_message | result: fail | agency_id: %v | error: %v",
@@ -156,8 +166,6 @@ func (a *Agency) receiveWinners() {
 
 	log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %v", winnersAmount)
 }
-
-// ---------------- Lifecycle ----------------
 
 // StartAgency runs the agency lifecycle
 func (a *Agency) StartAgency() {
