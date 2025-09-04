@@ -6,8 +6,8 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
-	"time"
 
 	"github.com/op/go-logging"
 )
@@ -18,8 +18,6 @@ var log = logging.MustGetLogger("log")
 type AgencyConfig struct {
 	ID            string
 	ServerAddress string
-	LoopAmount    int
-	LoopPeriod    time.Duration
 }
 
 type Bet struct {
@@ -32,9 +30,11 @@ type Bet struct {
 
 // Agency Entity that encapsulates how
 type Agency struct {
-	config AgencyConfig
-	conn   net.Conn
-	bet    Bet
+	config   AgencyConfig
+	conn     net.Conn
+	bet      Bet
+	mutex    sync.Mutex
+	shutdown bool
 }
 
 func (a *Agency) handleShutdown() {
@@ -43,11 +43,14 @@ func (a *Agency) handleShutdown() {
 
 	go func() {
 		<-sigs
-		log.Infof("action: shutdown | result: success | agency_id: %v", a.config.ID)
+		a.mutex.Lock()
+		a.shutdown = true
+		a.mutex.Unlock()
+
+		log.Infof("action: shutdown | result: success | client_id: %v", a.config.ID)
 		if a.conn != nil {
 			a.conn.Close()
 		}
-		os.Exit(0)
 	}()
 }
 
@@ -83,6 +86,12 @@ func (a *Agency) createAgencySocket() error {
 	}
 	a.conn = conn
 	return nil
+}
+
+func (a *Agency) isShutdown() bool {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	return a.shutdown
 }
 
 func (a *Agency) sendBet() error {
@@ -123,6 +132,10 @@ func (a *Agency) StartAgency() {
 		return
 	}
 	defer a.conn.Close()
+
+	if a.isShutdown() {
+		return
+	}
 
 	if err := a.sendBet(); err != nil {
 		log.Errorf("action: apuesta_enviada | result: fail | dni: %v | error: %v", a.bet.ID, err)

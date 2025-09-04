@@ -4,20 +4,29 @@ import signal
 import sys
 from common.utils import store_bets, Bet
 
+EXPECTED_BET_FIELDS = 5
+
 class Server:
     def __init__(self, port, listen_backlog):
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.bind(('', port))
         self._server_socket.listen(listen_backlog)
+        self._running = True
         self._clients = []
 
         signal.signal(signal.SIGTERM, self.__handle_shutdown)
 
     def run(self):
-        while True:
-            client_sock = self.__accept_new_connection()
-            self._clients.append(client_sock)
-            self.__handle_client_connection(client_sock)
+        while self._running:
+            try:
+                client_sock = self.__accept_new_connection()
+                self._clients.append(client_sock)
+                self.__handle_client_connection(client_sock)
+            except OSError as e:
+                if self._running:
+                    logging.error(f'action: accept_connections | result: fail | error: {e}')
+                else:
+                    break
 
     def __recv_all(self, sock, n):
         data = b""
@@ -33,7 +42,7 @@ class Server:
         message_length = ord(length_byte)
         message_bytes = self.__recv_all(sock, message_length)
         parts = message_bytes.decode('utf-8').strip().split('|')
-        if len(parts) == 5:
+        if len(parts) == EXPECTED_BET_FIELDS:
             name, surname, id, birthdate, number = parts
             return Bet(0, name, surname, id, birthdate, number)
         return None
@@ -65,8 +74,8 @@ class Server:
         return c
     
     def __handle_shutdown(self, signum, frame):
+        self._running = False
         for client in self._clients:
             client.close()
         self._server_socket.close()
         logging.info(f'action: server shutdown | result: success')
-        sys.exit(0)
