@@ -9,7 +9,7 @@ class Server:
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.bind(('', port))
         self._server_socket.listen(listen_backlog)
-        self.running = True
+        self._running = True
         self._clients = []
 
         signal.signal(signal.SIGTERM, self.__handle_shutdown)
@@ -25,13 +25,13 @@ class Server:
 
         # TODO: Modify this program to handle signal to graceful shutdown
         # the server
-        while self.running:
+        while self._running:
             try:
                 client_sock = self.__accept_new_connection()
                 self._clients.append(client_sock)
                 self.__handle_client_connection(client_sock)
             except OSError as e:
-                if self.running:
+                if self._running:
                     logging.error(f'action: accept_connections | result: fail | error: {e}')
                 else:
                     break
@@ -71,7 +71,7 @@ class Server:
         return c
     
     def __handle_shutdown(self, signum, frame):
-        self.running = False
+        self._running = False
         for client in self._clients:
             client.close()
             

@@ -109,14 +109,11 @@ El script deberá ubicarse en la raíz del proyecto. Netcat no debe ser instalad
 Modificar servidor y cliente para que ambos sistemas terminen de forma _graceful_ al recibir la signal SIGTERM. Terminar la aplicación de forma _graceful_ implica que todos los _file descriptors_ (entre los que se encuentran archivos, sockets, threads y procesos) deben cerrarse correctamente antes que el thread de la aplicación principal muera. Loguear mensajes en el cierre de cada recurso (hint: Verificar que hace el flag `-t` utilizado en el comando `docker compose down`).
 
 **Resolución**
-Actualmente, tanto el servidor como el cliente esperan señales SIGTERM.
+Se implementó un mecanismo de **graceful shutdown** tanto en el server como en el client. En el server de Python se define la variable `_running` que indica si se debe salir del loop principal; al recibir la señal SIGTERM, el handler ejecuta `__handle_shutdown()`, cierra el socket del servidor y de los clientes actuales, y la flag se pone en True para que el loop termine ordenadamente. El `accept()` puede lanzar un `OSError` al cerrarse el socket, que se captura para evitar tracebacks y finalizar correctamente.
 
-En Python (servidor), se registra un handler en el hilo principal usando signal.signal. Cuando llega la señal, el hilo principal ejecuta el handler que cierra todos los recursos abiertos (sockets) y luego permite que la aplicación termine naturalmente.
+En el client de Go se creó una flag `shutdown` protegida por un mutex (`sync.Mutex`) para evitar condiciones de carrera entre la goroutine que escucha SIGTERM y el loop principal que envía mensajes. La goroutine marca la flag y cierra la conexión si está abierta. El loop principal revisa periódicamente esta flag y sale de forma ordenada, cerrando sockets y liberando recursos.
 
-En Go (cliente), se lanza un goroutine en background que escucha la señal. Cuando se recibe SIGTERM, la goroutine cierra la conexión y registra los logs, mientras el hilo principal sigue ejecutando normalmente hasta que termina su loop.
-
-De esta forma, ambos sistemas realizan un cierre graceful, liberando correctamente todos los recursos y registrando logs de cada cierre antes de que la aplicación finalice.
-
+En ambos casos, la idea central es que una variable indica cuándo detener la ejecución, se manejan los recursos abiertos antes de salir y se evita que el programa termine abruptamente. El mutex en Go garantiza que la flag se lea y escriba de forma segura entre la goroutine de señal y el hilo principal.
 
 ## Parte 2: Repaso de Comunicaciones
 
