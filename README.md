@@ -230,4 +230,13 @@ A continuación se resumen los puntos clave:
 | **Exclusión mutua (Locks)** | Se definen dos *locks*: uno para operaciones de archivo (dado que `store_bets` y `load_bets` no son thread-safe) y otro para asegurar la exclusión mutua al acceder o modificar el diccionario compartido de agencias. Cada proceso adquiere el lock que necesita en cada momento. |
 | **Sincronización (Barrier)**| Se utiliza una barrera para sincronizar a todos los procesos en el punto en que se recibe la solicitud de ganadores. Esto garantiza que se hayan procesado todas las apuestas antes de proceder al sorteo del ganador. |
 
+
 ---
+
+Utilizar **multiprocessing**, permite aislar cada cliente en un proceso independiente. Podría usar **threads**, ya que las tareas no son intensivas en CPU; en este caso, el GIL no sería un problema y la GUI podría manejar los threads sin inconvenientes.
+
+Los **procesos** son más costosos que los threads, consumen más memoria y recursos, pero si el número de clientes es limitado, esto no representa un problema. Para optimizar el uso de recursos, se pueden usar **pools de threads o de procesos**, evitando crear demasiados simultáneamente y controlando mejor la carga del sistema.
+
+En general, para un servidor que atiende clientes con operaciones principalmente I/O-bound, un pool de threads suele ser más eficiente, mientras que un pool de procesos conviene más para tareas CPU-bound.
+
+Pero como eran pocos clientes decidí usar multiprocessing.
