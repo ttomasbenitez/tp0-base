@@ -133,6 +133,24 @@ Se deberá implementar un módulo de comunicación entre el cliente y el servido
 * Correcta separación de responsabilidades entre modelo de dominio y capa de comunicación.
 * Correcto empleo de sockets, incluyendo manejo de errores y evitando los fenómenos conocidos como [_short read y short write_](https://cs61.seas.harvard.edu/site/2018/FileDescriptors/).
 
+**Resolución**
+
+El sistema de quiniela utiliza un protocolo simple basado en longitud explícita y datos serializados para la comunicación entre clientes (agencias) y el servidor (central de lotería).
+
+Cada mensaje enviado por el cliente comienza con un byte que indica la longitud total del mensaje, seguido de los campos de la apuesta separados por `|` y salto de línea para indicar el fin.
+
+Ejemplo:
+[N]Santiago Lionel|Lorca|30904465|1999-03-17|7574\n
+
+- `N`: longitud total del mensaje en bytes.  
+- Campos: nombre, apellido, DNI, fecha de nacimiento y número apostado.  
+
+El servidor recibe exactamente `N` bytes, separa los campos por `|`, valida la apuesta y la almacena usando `store_bets(...)`. Luego responde:
+Ejemplo:
+7574\n
+
+- Contiene únicamente el número apostado como confirmación de recepción y salto de línea para indicar el fin.
+
 
 ### Ejercicio N°6:
 Modificar los clientes para que envíen varias apuestas a la vez (modalidad conocida como procesamiento por _chunks_ o _batchs_). 
