@@ -41,6 +41,7 @@ class Server:
         self._agencies_ids_lock = multiprocessing.Lock()    # For _agencies_ids dict
     
         signal.signal(signal.SIGTERM, self.__handle_shutdown)
+        signal.signal(signal.SIGINT, self.__handle_shutdown)
 
     def run(self):
         """
@@ -141,8 +142,11 @@ class Server:
         try:
             msg_type = client_sock.recv(1)
             if msg_type == ASK_WINNER_TYPE:
-                sendWinnersBarrier.wait()  # Ensure synchronization between all processes
-                self.__send_winners(client_sock)
+                try:
+                    sendWinnersBarrier.wait(timeout=5)  # Ensure synchronization between all processes
+                    self.__send_winners(client_sock)
+                except multiprocessing.BrokenBarrierError:
+                    logging.info("action: barrier_timeout | result: proceeding_with_available_clients")
         except OSError as e:
             logging.error(f"action: receive_message | result: fail | error: {e}")
             raise

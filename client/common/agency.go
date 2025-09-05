@@ -61,7 +61,7 @@ func NewAgency(config AgencyConfig) (*Agency, error) {
 // handleShutdown listens for SIGTERM and gracefully shuts down the agency
 func (a *Agency) handleShutdown() {
 	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGTERM)
+	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		<-sigs
 		a.mutex.Lock()
