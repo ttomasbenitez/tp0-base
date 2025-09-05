@@ -111,6 +111,8 @@ func main() {
 		BatchSize:     v.GetInt("batch.maxAmount"),
 	}
 
-	agency := common.NewAgency(agencyConfig)
-	agency.StartAgency()
+	agency, err := common.NewAgency(agencyConfig)
+	if err != nil {
+		agency.StartAgency()
+	}
 }
