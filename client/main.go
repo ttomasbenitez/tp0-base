@@ -112,7 +112,7 @@ func main() {
 	}
 
 	agency, err := common.NewAgency(agencyConfig)
-	if err != nil {
+	if err == nil {
 		agency.StartAgency()
 	}
 }
