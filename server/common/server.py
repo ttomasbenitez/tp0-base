@@ -3,6 +3,7 @@ import logging
 import signal
 import sys
 import multiprocessing
+from threading import BrokenBarrierError
 from common.utils import store_bets, load_bets, has_won, Bet
 
 EXPECTED_BET_FIELDS = 6
@@ -145,7 +146,7 @@ class Server:
                 try:
                     sendWinnersBarrier.wait(timeout=5)  # Ensure synchronization between all processes
                     self.__send_winners(client_sock)
-                except multiprocessing.BrokenBarrierError:
+                except BrokenBarrierError:
                     logging.info("action: barrier_timeout | result: proceeding_with_available_clients")
         except OSError as e:
             logging.error(f"action: receive_message | result: fail | error: {e}")
