@@ -111,6 +111,7 @@ func (a *Agency) sendBets() error {
 		if a.isShutdown() {
 			return nil
 		}
+		time.Sleep(6000 * time.Millisecond)
 
 		bets, err := a.betParser.ReadBets(a.config.BatchSize, a.config.ID)
 		if err != nil {
