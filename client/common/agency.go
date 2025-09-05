@@ -177,7 +177,6 @@ func (a *Agency) receiveWinners() error {
 }
 
 // StartAgency runs the agency lifecycle
-// Returns error instead of calling os.Exit
 func (a *Agency) StartAgency() error {
 	defer a.Close()
 
