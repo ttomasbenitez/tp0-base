@@ -14,6 +14,10 @@ ASK_WINNER_TYPE = b"\x03"
 MESS_TYPE_BYTES = 1
 MESS_LENGTH_BYTES = 2
 
+class ConnectionClosedException(Exception):
+    """Exception raised when a client connection is closed unexpectedly."""
+    pass
+
 class Server:
     def __init__(self, port, listen_backlog, clients_amount):
         """
@@ -66,13 +70,14 @@ class Server:
     def __recv_all(self, sock, size):
         """
         Helper function to ensure that the exact number of bytes is received.
+        Raises ConnectionClosedException if the connection is closed.
         """
         data = b""
         while len(data) < size:
             chunk = sock.recv(size - len(data))
             if not chunk:
                 logging.error('action: connection_ended | result: fail')
-                exit(1)
+                raise ConnectionClosedException("Client connection closed unexpectedly")
             data += chunk
         return data
 
@@ -125,9 +130,9 @@ class Server:
                 with self._agencies_ids_lock:
                     self._agencies_ids.setdefault(client_sock.fileno(), bets[0].agency)
 
-            except OSError as e:
+            except (OSError, ConnectionClosedException) as e:
                 logging.error(f"action: receive_message | result: fail | error: {e}")
-                break
+                raise  # Re-raise to let the parent handle it
 
     def __check_for_winner_request(self, client_sock, sendWinnersBarrier):
         """
@@ -140,13 +145,19 @@ class Server:
                 self.__send_winners(client_sock)
         except OSError as e:
             logging.error(f"action: receive_message | result: fail | error: {e}")
+            raise
 
     def __handle_client_connection(self, client_sock, sendWinnersBarrier):
         """
         Handles communication with a client: receives bet data, stores it, and waits for the barrier to send winners.
         """
-        self.__process_bets(client_sock)
-        self.__check_for_winner_request(client_sock, sendWinnersBarrier)
+        try:
+            self.__process_bets(client_sock)
+            self.__check_for_winner_request(client_sock, sendWinnersBarrier)
+        except (OSError, ConnectionClosedException) as e:
+            logging.error(f"action: handle_client | result: fail | error: {e}")
+        finally:
+            client_sock.close()
 
     def __send_winner_to_client(self, client_sock, winner_bet):
         """
