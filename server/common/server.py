@@ -134,7 +134,7 @@ class Server:
 
             except (OSError, ConnectionClosedException) as e:
                 logging.error(f"action: receive_message | result: fail | error: {e}")
-                raise  # Re-raise to let the parent handle it
+                raise
 
     def __check_for_winner_request(self, client_sock, sendWinnersBarrier):
         """
@@ -147,7 +147,7 @@ class Server:
                     sendWinnersBarrier.wait(timeout=5)  # Ensure synchronization between all processes
                     self.__send_winners(client_sock)
                 except BrokenBarrierError:
-                    logging.info("action: barrier_timeout | result: proceeding_with_available_clients")
+                    logging.info("action: consultar ganadores | result: fail")
         except OSError as e:
             logging.error(f"action: receive_message | result: fail | error: {e}")
             raise
